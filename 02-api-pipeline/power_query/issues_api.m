@@ -1,0 +1,121 @@
+// issues_api.m
+// Power Query (M) для выгрузки обращений из REST API с пагинацией.
+//
+// В Power BI каждый блок ниже — отдельный запрос. Порядок создания:
+//   1. Параметры: pBaseUrl, pState, pPerPage, pMaxPages, pExpectedCount
+//   2. issues_raw
+//   3. issues_checks
+//
+// Параметризация по pBaseUrl: тот же запрос работает с iiko API, CRM,
+// маркетплейсом или любой другой системой, отдающей JSON-список с ?page=.
+// Меняются только адрес и список полей при разворачивании.
+
+// ---------------------------------------------------------------- параметры
+// Создать через "Управление параметрами". Типы: текст / текст / целое /
+// целое / целое. pExpectedCount — контрольное число из источника (у GitHub
+// это open_issues_count из /repos/{owner}/{repo}), нужно для проверки полноты.
+
+// pBaseUrl        = "https://api.github.com/repos/duckdb/duckdb/issues"
+// pState          = "open"
+// pPerPage        = 100
+// pMaxPages       = 30
+// pExpectedCount  = 1292
+
+// ------------------------------------------------------------- issues_raw
+let
+    Headers = [
+        #"User-Agent" = "DataPortfolioBot/1.0 (portfolio project)",
+        #"Accept" = "application/vnd.github+json"
+    ],
+
+    // Один запрос = одна страница. ManualStatusHandling не даёт Power Query
+    // молча превратить 403 в пустую таблицу: код проверяем сами.
+    FetchPage = (page as number) as list =>
+        let
+            url = pBaseUrl
+                & "?state=" & pState
+                & "&per_page=" & Number.ToText(pPerPage)
+                & "&page=" & Number.ToText(page),
+            response = Web.Contents(
+                url,
+                [Headers = Headers, ManualStatusHandling = {400, 403, 404, 422, 429, 500, 502, 503}]
+            ),
+            status = Value.Metadata(response)[Response.Status]?,
+            body =
+                if status = 200 then Json.Document(response)
+                else error Error.Record(
+                    "HTTP " & Number.ToText(status),
+                    "Источник вернул ошибку. 403 при пустом X-RateLimit-Remaining — "
+                    & "исчерпана квота, нужен токен или пауза.",
+                    url
+                )
+        in
+            if body is list then body else error "Ожидался JSON-массив",
+
+    // Идём по номерам страниц, пока страница не вернёт пустой список.
+    // Ограничение pMaxPages защищает от бесконечного цикла при «залипшей»
+    // пагинации, когда источник всегда отдаёт последнюю страницу.
+    Pages = List.Generate(
+        () => [Page = 1, Data = FetchPage(1)],
+        each List.Count([Data]) > 0 and [Page] <= pMaxPages,
+        each [Page = [Page] + 1, Data = FetchPage([Page] + 1)],
+        each [Data]
+    ),
+
+    Combined = List.Combine(Pages),
+    AsTable = Table.FromList(Combined, Splitter.SplitByNothing(), {"raw"}, null, ExtraValues.Error),
+
+    // Разворачиваем вложенный JSON по одному полю: так отсутствующее поле
+    // даёт null, а не ошибку всего запроса.
+    WithNumber = Table.AddColumn(AsTable, "number", each try [raw][number] otherwise null, Int64.Type),
+    WithTitle = Table.AddColumn(WithNumber, "title", each try [raw][title] otherwise null, type text),
+    WithState = Table.AddColumn(WithTitle, "state", each try [raw][state] otherwise null, type text),
+    WithCreated = Table.AddColumn(WithState, "created_at",
+        each try DateTime.FromText(Text.Replace(Text.Replace([raw][created_at], "Z", ""), "T", " "))
+        otherwise null, type datetime),
+    WithClosed = Table.AddColumn(WithCreated, "closed_at",
+        each try DateTime.FromText(Text.Replace(Text.Replace([raw][closed_at], "Z", ""), "T", " "))
+        otherwise null, type datetime),
+    WithAuthor = Table.AddColumn(WithClosed, "author_login",
+        each try [raw][user][login] otherwise null, type text),
+    WithAuthorType = Table.AddColumn(WithAuthor, "author_type",
+        each try [raw][user][type] otherwise null, type text),
+    WithLabels = Table.AddColumn(WithAuthorType, "labels",
+        each try Text.Combine(List.Transform([raw][labels], each [name]), "; ") otherwise "", type text),
+    WithLabelsCount = Table.AddColumn(WithLabels, "labels_count",
+        each try List.Count([raw][labels]) otherwise 0, Int64.Type),
+    WithComments = Table.AddColumn(WithLabelsCount, "comments",
+        each try [raw][comments] otherwise 0, Int64.Type),
+    // В/issues попадают и pull request'ы — без этого флага метрики врут
+    WithPr = Table.AddColumn(WithComments, "is_pull_request",
+        each if Record.HasFields([raw], "pull_request") then 1 else 0, Int64.Type),
+
+    RemovedRaw = Table.RemoveColumns(WithPr, {"raw"}),
+    Deduped = Table.Distinct(RemovedRaw, {"number"})
+in
+    Deduped
+
+// ---------------------------------------------------------- issues_checks
+// Таблица проверок: открывается на странице «Качество данных» дашборда.
+// Если хоть одна строка FAIL — обновление отчёта помечается как проблемное.
+let
+    Src = issues_raw,
+    Rows = Table.RowCount(Src),
+    Unique = List.Count(List.Distinct(Table.Column(Src, "number"))),
+    PrShare = List.Average(Table.Column(Src, "is_pull_request")),
+    NoLabels = Table.RowCount(Table.SelectRows(Src, each [labels_count] = 0)),
+    Checks = #table(
+        type table [check = text, expected = any, actual = any, status = text, note = text],
+        {
+            {"Строк против счётчика источника", pExpectedCount, Rows,
+                if Rows = pExpectedCount then "OK" else "FAIL",
+                "счётчик источника включает pull request"},
+            {"Дубли по номеру", 0, Rows - Unique,
+                if Rows = Unique then "OK" else "FAIL", ""},
+            {"Доля pull request", "справочно", Number.Round(PrShare, 3),
+                "INFO", "метрики по обращениям считать без PR"},
+            {"Обращений без меток", "справочно", NoLabels, "INFO", ""}
+        }
+    )
+in
+    Checks

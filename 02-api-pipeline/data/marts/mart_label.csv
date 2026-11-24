@@ -1,0 +1,25 @@
+﻿label,issues_cnt
+Breaking Change,2
+C API,1
+CI Failure,2
+Changes Requested,40
+Do Not Review,4
+Draft,3
+Member,96
+Merge Conflict,1
+Needs Documentation,13
+PR submitted,18
+Ready For Review,8
+Ready To Merge,8
+backport v2.0-cyanoptera,30
+expected behavior,6
+feature,5
+incorrect results,1
+needs maintainer approval,6
+needs more info,1
+needs reproducible example,11
+needs triage,92
+no stale,1
+reproduced,395
+stale,139
+under review,89

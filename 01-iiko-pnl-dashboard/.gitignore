@@ -1,0 +1,12 @@
+# Сырьё и база пересобираются двумя командами — в репозиторий не идут
+data/raw/
+data/analytics.db
+tmp_*.py
+
+# Служебное
+__pycache__/
+*.pyc
+.venv/
+.vscode/
+.DS_Store
+Thumbs.db

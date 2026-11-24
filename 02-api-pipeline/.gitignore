@@ -1,0 +1,13 @@
+# Сырьё пересобирается командой python api_fetch.py
+data/raw/pages/
+data/raw/issues.csv
+data/raw/fetch_log.csv
+data/raw/completeness.csv
+data/api_pipeline.db
+
+__pycache__/
+*.pyc
+.venv/
+.vscode/
+.DS_Store
+Thumbs.db
