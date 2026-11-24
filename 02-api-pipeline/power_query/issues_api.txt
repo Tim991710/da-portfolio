@@ -1,4 +1,4 @@
-// issues_api.pq
+﻿// issues_api.txt
 // Power Query (M) для выгрузки обращений из REST API с пагинацией.
 //
 // В Power BI каждый блок ниже — отдельный запрос. Порядок создания:
@@ -119,3 +119,4 @@ let
     )
 in
     Checks
+
