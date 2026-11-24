@@ -1,0 +1,2 @@
+# Power Query-код лежит в .txt, чтобы GitHub не относил его к Mathematica
+02-api-pipeline/power_query/*.txt linguist-detectable=false
