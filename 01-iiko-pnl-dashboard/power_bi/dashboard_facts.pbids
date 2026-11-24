@@ -1,0 +1,14 @@
+{
+  "version": "0.1",
+  "connections": [
+    {
+      "details": {
+        "protocol": "file",
+        "address": {
+          "path": "C:\\Users\\User\\Documents\\MultiTool\\HomeChats\\Chat-22\\portfolio\\01-iiko-pnl-dashboard\\data\\marts\\dashboard_facts.csv"
+        }
+      },
+      "mode": "Import"
+    }
+  ]
+}
