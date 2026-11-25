@@ -15,6 +15,17 @@
 - `screenshots/` — страницы дашбордов (PDF-экспорт и PNG).
 - Данные синтетические или открытые, это указано в каждом README.
 
+## Результаты в картинках
+
+Дашборд план-факт P&L сети (10 точек, 24 месяца, 238 882 строки):
+
+![Дашборд](01-iiko-pnl-dashboard/screenshots/01-summary.png)
+
+Выгрузка из REST API (1 292 записи, 11 проверок полноты):
+
+![Топ меток](02-api-pipeline/screenshots/01-labels.png)
+![Динамика](02-api-pipeline/screenshots/02-monthly.png)
+
 ## Быстрый старт
 
 ```powershell
