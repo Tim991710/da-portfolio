@@ -90,6 +90,24 @@ COST_STEPS = [
 ]
 
 
+# Атрибуты заказа, как в iiko OLAP: час, канал продажи, тип оплаты, гости
+HOURS = np.array([8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22])
+HOUR_W = np.array([2, 3, 4, 6, 12, 14, 12, 8, 6, 6, 8, 9, 7, 4, 2], dtype=float)
+HOUR_W = HOUR_W / HOUR_W.sum()
+
+ORDER_TYPES = np.array(["Зал", "На вынос", "Доставка"])
+ORDER_W = np.array([0.55, 0.30, 0.15])
+
+PAY_TYPES = np.array(["Наличные", "Карта", "Онлайн"])
+PAY_W = np.array([0.25, 0.60, 0.15])
+
+DISCOUNT_TYPES = np.array(["Скидка на блюдо", "Промокод", "Скидка сотрудника"])
+DISCOUNT_W = np.array([0.55, 0.35, 0.10])
+
+WRITEOFF_REASONS = np.array(["Брак", "Порча", "Истечение срока", "Дегустация", "Ошибка кассира"])
+WRITEOFF_W = np.array([0.30, 0.25, 0.25, 0.12, 0.08])
+
+
 def price_mult(day: pd.Timestamp) -> float:
     m = 1.0
     for dt, k in PRICE_STEPS:
@@ -142,6 +160,12 @@ def build_sales() -> pd.DataFrame:
             for _ in range(n_orders):
                 basket = int(rng.choice([1, 2, 3, 4, 5], p=[0.45, 0.32, 0.15, 0.06, 0.02]))
                 cats = rng.choice(cat_w.index.to_numpy(), size=basket, p=cat_w.to_numpy())
+                # Атрибуты заказа: в iiko OLAP они доступны в каждой строке чека
+                hour = int(rng.choice(HOURS, p=HOUR_W))
+                ts = day + pd.Timedelta(hours=hour, minutes=int(rng.integers(0, 60)))
+                order_type = str(rng.choice(ORDER_TYPES, p=ORDER_W))
+                payment = str(rng.choice(PAY_TYPES, p=PAY_W))
+                guests = int(rng.choice([1, 1, 2, 2, 3, 4]))
                 for line_no, cat in enumerate(cats, start=1):
                     dish = by_cat[cat][rng.integers(0, len(by_cat[cat]))]
                     qty = 1 if cat != "Соусы" else int(rng.choice([1, 1, 2]))
@@ -149,8 +173,10 @@ def build_sales() -> pd.DataFrame:
                     amount = round(price * qty, 2)
                     if rng.random() < 0.18:
                         discount = round(amount * rng.choice([0.05, 0.10, 0.15, 0.20, 0.30]), 2)
+                        discount_type = str(rng.choice(DISCOUNT_TYPES, p=DISCOUNT_W))
                     else:
                         discount = 0.0
+                        discount_type = "Без скидки"
                     cost = round(dish["cost"] * cost_mult(day, cat) * qty, 2)
                     code = dish["dish_code"]
                     name = dish["dish_name"]
@@ -160,13 +186,18 @@ def build_sales() -> pd.DataFrame:
                         (
                             f"{outlet_code}-{day:%Y%m%d}-{order_seq:07d}",
                             line_no,
-                            day.strftime("%Y-%m-%d %H:%M:%S"),
+                            ts.strftime("%Y-%m-%d %H:%M:%S"),
+                            hour,
+                            order_type,
+                            payment,
+                            guests,
                             outlet_code,
                             code,
                             name,
                             cat,
                             qty,
                             price,
+                            discount_type,
                             discount,
                             round(amount - discount, 2),
                             amount,
@@ -182,12 +213,17 @@ def build_sales() -> pd.DataFrame:
             "order_id",
             "order_line_id",
             "order_datetime",
+            "order_hour",
+            "order_type",
+            "payment_type",
+            "guest_count",
             "outlet_code",
             "dish_code",
             "dish_name",
             "category",
             "qty",
             "price",
+            "discount_type",
             "discount_sum",
             "amount_paid",
             "amount_gross",
@@ -292,6 +328,58 @@ def build_refs() -> tuple[pd.DataFrame, pd.DataFrame]:
     return outlets, costs
 
 
+def build_writeoffs() -> pd.DataFrame:
+    """Акты списания — вторая выгрузка iiko: брак, порча, истечение срока."""
+    rows: list[tuple] = []
+    seq = 1
+    for outlet_code, _, _, open_date, _, _ in OUTLETS:
+        open_dt = pd.Timestamp(open_date)
+        for m in pd.period_range(START, END, freq="M"):
+            m_start = m.to_timestamp()
+            if m_start < pd.Timestamp(open_dt.year, open_dt.month, 1):
+                continue
+            for _ in range(int(rng.integers(8, 19))):
+                code, name, cat, _, base_cost = DISHES[int(rng.integers(0, len(DISHES)))]
+                day = m_start + pd.Timedelta(days=int(rng.integers(0, 27)))
+                qty = int(rng.integers(1, 5))
+                cost = round(base_cost * cost_mult(day, cat) * qty, 2)
+                rows.append(
+                    (
+                        f"WO-{m.strftime('%Y%m')}-{seq:05d}",
+                        day.strftime("%Y-%m-%d"),
+                        outlet_code,
+                        code,
+                        name,
+                        cat,
+                        qty,
+                        str(rng.choice(WRITEOFF_REASONS, p=WRITEOFF_W)),
+                        cost,
+                        "Сотрудник точки",
+                    )
+                )
+                seq += 1
+
+    df = pd.DataFrame(
+        rows,
+        columns=[
+            "doc_number",
+            "writeoff_date",
+            "outlet_code",
+            "dish_code",
+            "dish_name",
+            "category",
+            "qty",
+            "reason",
+            "cost_sum",
+            "employee",
+        ],
+    )
+    # дефект выгрузки: три строки с отрицательным количеством
+    bad = rng.choice(df.index.to_numpy(), size=3, replace=False)
+    df.loc[bad, ["qty", "cost_sum"]] *= -1
+    return df
+
+
 def main() -> None:
     sales = build_sales()
     sales, sales_marks = degrade(sales)
@@ -316,7 +404,18 @@ def main() -> None:
     plan = build_plan(sales)
     plan.to_csv(RAW / "plan_revenue_payroll.csv", index=False, encoding="utf-8")
 
-    marks = {**sales_marks, **payroll_marks, "sales_rows": len(sales), "orders": sales["order_id"].nunique()}
+    # Вторая выгрузка iiko: акты списания (брак, порча, истечение срока)
+    writeoffs = build_writeoffs()
+    writeoffs.to_csv(RAW / "iiko_writeoffs.csv", index=False, encoding="utf-8")
+
+    marks = {
+        **sales_marks,
+        **payroll_marks,
+        "sales_rows": len(sales),
+        "orders": sales["order_id"].nunique(),
+        "writeoff_rows": len(writeoffs),
+        "writeoff_sum": round(float(writeoffs.loc[writeoffs["qty"] > 0, "cost_sum"].sum()), 2),
+    }
     print("Готово. Файлы в", RAW)
     for k, v in marks.items():
         print(f"  {k}: {v}")

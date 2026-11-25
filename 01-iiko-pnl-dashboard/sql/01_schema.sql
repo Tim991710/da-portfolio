@@ -44,15 +44,32 @@ CREATE TABLE fact_sales (
     order_id      TEXT NOT NULL,
     order_line_id INTEGER NOT NULL,
     date_key      TEXT NOT NULL,
+    order_hour    INTEGER NOT NULL,
+    order_type    TEXT NOT NULL,
+    payment_type  TEXT NOT NULL,
+    guest_count   INTEGER NOT NULL,
     outlet_code   TEXT NOT NULL,
     dish_code     TEXT NOT NULL,
     qty           INTEGER NOT NULL,
     price         REAL NOT NULL,
+    discount_type TEXT NOT NULL,
     discount_sum  REAL NOT NULL,
     amount_gross  REAL NOT NULL,
     amount_paid   REAL NOT NULL,     -- выручка: сумма после скидки
     cost_sum      REAL NOT NULL,
     PRIMARY KEY (order_id, order_line_id)
+);
+
+-- Акты списания: брак, порча, истечение срока, дегустация
+CREATE TABLE fact_writeoff (
+    doc_number    TEXT PRIMARY KEY,
+    writeoff_date TEXT NOT NULL,
+    outlet_code   TEXT NOT NULL,
+    dish_code     TEXT NOT NULL,
+    category      TEXT NOT NULL,
+    qty           INTEGER NOT NULL,
+    reason        TEXT NOT NULL,
+    cost_sum      REAL NOT NULL
 );
 
 CREATE TABLE fact_payroll (
@@ -91,6 +108,9 @@ CREATE TABLE mart_monthly_outlet (
     gross_margin_pct    REAL,
     payroll_pct         REAL,
     operating_profit_pct REAL,
+    writeoff_sum        REAL NOT NULL DEFAULT 0,
+    writeoff_pct        REAL,
+    op_margin_wr_pct    REAL,
     checks_cnt          INTEGER NOT NULL,
     avg_check           REAL,
     payroll_missing     INTEGER NOT NULL,

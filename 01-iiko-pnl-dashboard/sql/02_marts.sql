@@ -34,16 +34,18 @@ WHERE order_status = 'Closed' AND qty > 0 AND amount_paid < 0;
 
 -- DISTINCT убирает повторы повторной выгрузки; Deleted-заказы исключены.
 INSERT INTO fact_sales (
-    order_id, order_line_id, date_key, outlet_code, dish_code,
-    qty, price, discount_sum, amount_gross, amount_paid, cost_sum
+    order_id, order_line_id, date_key, order_hour, order_type, payment_type,
+    guest_count, outlet_code, dish_code, qty, price, discount_type,
+    discount_sum, amount_gross, amount_paid, cost_sum
 )
 SELECT DISTINCT
     order_id,
     order_line_id,
     substr(order_datetime, 1, 10) AS date_key,
+    order_hour, order_type, payment_type, guest_count,
     outlet_code,
     CASE WHEN dish_code = 'D15N' THEN 'D15' ELSE dish_code END AS dish_code,
-    qty, price, discount_sum, amount_gross, amount_paid, cost_sum
+    qty, price, discount_type, discount_sum, amount_gross, amount_paid, cost_sum
 FROM raw_sales
 WHERE order_status = 'Closed'
   AND NOT (qty > 0 AND amount_paid < 0);
@@ -56,6 +58,19 @@ INSERT INTO fact_plan (month_start, outlet_code, revenue_plan, payroll_plan)
 SELECT DISTINCT month_start, outlet_code, revenue_plan, payroll_plan
 FROM raw_plan;
 
+-- Списания: отрицательные количества — ошибка ввода, в витрину не идут
+INSERT INTO fact_writeoff (
+    doc_number, writeoff_date, outlet_code, dish_code, category, qty, reason, cost_sum
+)
+SELECT DISTINCT
+    doc_number,
+    writeoff_date,
+    outlet_code,
+    CASE WHEN dish_code = 'D15N' THEN 'D15' ELSE dish_code END AS dish_code,
+    category, qty, reason, cost_sum
+FROM raw_writeoffs
+WHERE qty > 0;
+
 -- ---------- Марты ----------
 
 -- Месяц x точка: выручка, food cost, ФОТ, маржинальность, рентабельность.
@@ -63,7 +78,9 @@ FROM raw_plan;
 -- остаётся NULL, а не 0, чтобы не занижать долю ФОТ.
 INSERT INTO mart_monthly_outlet (
     month_start, outlet_code, revenue, foodcost, gross_profit, payroll,
-    gross_margin_pct, payroll_pct, operating_profit_pct, checks_cnt, avg_check, payroll_missing
+    gross_margin_pct, payroll_pct, operating_profit_pct,
+    writeoff_sum, writeoff_pct, op_margin_wr_pct,
+    checks_cnt, avg_check, payroll_missing
 )
 SELECT
     s.month_start,
@@ -75,6 +92,9 @@ SELECT
     ROUND((s.revenue - s.foodcost) / s.revenue * 100, 2),
     ROUND(p.payroll / s.revenue * 100, 2),
     ROUND((s.revenue - s.foodcost - p.payroll) / s.revenue * 100, 2),
+    ROUND(COALESCE(w.wr, 0), 2),
+    ROUND(COALESCE(w.wr, 0) / s.revenue * 100, 2),
+    ROUND((s.revenue - s.foodcost - p.payroll - COALESCE(w.wr, 0)) / s.revenue * 100, 2),
     s.checks_cnt,
     ROUND(s.revenue / s.checks_cnt, 0),
     CASE WHEN p.payroll IS NULL THEN 1 ELSE 0 END
@@ -95,6 +115,16 @@ LEFT JOIN (
 ) AS p
     ON p.month_start = s.month_start
    AND p.outlet_code = s.outlet_code
+LEFT JOIN (
+    SELECT
+        substr(writeoff_date, 1, 7) || '-01' AS month_start,
+        outlet_code,
+        SUM(cost_sum) AS wr
+    FROM fact_writeoff
+    GROUP BY 1, 2
+) AS w
+    ON w.month_start = s.month_start
+   AND w.outlet_code = s.outlet_code
 WHERE s.revenue > 0;
 
 -- План-факт: отклонения в рублях, процентах и п.п. по доле ФОТ.

@@ -54,6 +54,10 @@ def load_raw(con: sqlite3.Connection) -> None:
     pd.read_csv(
         RAW / "plan_revenue_payroll.csv", dtype={"outlet_code": str}
     ).to_sql("raw_plan", con, if_exists="replace", index=False)
+    pd.read_csv(
+        RAW / "iiko_writeoffs.csv",
+        dtype={"outlet_code": str, "dish_code": str, "doc_number": str},
+    ).to_sql("raw_writeoffs", con, if_exists="replace", index=False)
 
 
 def build_dim_date(con: sqlite3.Connection) -> None:
@@ -81,7 +85,7 @@ def run_sql(con: sqlite3.Connection, name: str) -> None:
 
 def export_marts(con: sqlite3.Connection) -> None:
     for table in [
-        "dim_date", "dim_outlet", "dim_dish", "fact_sales",
+        "dim_date", "dim_outlet", "dim_dish", "fact_sales", "fact_writeoff",
         "fact_payroll", "fact_plan", "mart_monthly_outlet", "mart_plan_fact",
         "log_data_quality", "quarantine_sales",
     ]:

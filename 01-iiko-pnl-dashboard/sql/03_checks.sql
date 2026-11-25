@@ -108,4 +108,33 @@ SELECT 'C11 Итоги по сети',
        '—',
        printf('%d месяцев, %d точек', COUNT(DISTINCT month_start), COUNT(DISTINCT outlet_code)),
        'INFO'
-FROM mart_monthly_outlet;
+FROM mart_monthly_outlet
+UNION ALL
+SELECT 'C12 Часы вне диапазона 0-23',
+       '0',
+       CAST(COUNT(*) AS TEXT),
+       CASE WHEN COUNT(*) = 0 THEN 'OK' ELSE 'FAIL' END,
+       'час заказа — измерение для матрицы по времени'
+FROM fact_sales
+WHERE order_hour < 0 OR order_hour > 23
+UNION ALL
+SELECT 'C13 Каналы продажи',
+       'Зал / На вынос / Доставка',
+       CAST(COUNT(DISTINCT order_type) AS TEXT) || ' значений',
+       CASE WHEN SUM(CASE WHEN order_type NOT IN ('Зал', 'На вынос', 'Доставка') THEN 1 ELSE 0 END) = 0
+            THEN 'OK' ELSE 'WARN' END,
+       ''
+FROM fact_sales
+UNION ALL
+SELECT 'C14 Отрицательные списания',
+       '0 в витрине',
+       CAST((SELECT COUNT(*) FROM raw_writeoffs WHERE qty < 0) AS TEXT) || ' строк в сырье',
+       CASE WHEN (SELECT COUNT(*) FROM raw_writeoffs WHERE qty < 0) = 0 THEN 'OK' ELSE 'OK: изолированы' END,
+       'ошибка ввода, в fact_writeoff не попадают'
+UNION ALL
+SELECT 'C15 Доля списаний от food cost',
+       '1-4%',
+       printf('%.2f%%', (SELECT SUM(cost_sum) FROM fact_writeoff) * 100.0
+                        / (SELECT SUM(cost_sum) FROM fact_sales)),
+       'INFO',
+       'выше 5% — повод разбирать причины';
